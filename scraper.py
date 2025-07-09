@@ -10,12 +10,18 @@ import logging
 from pymongo import MongoClient
 import sys
 import os
+from dotenv import load_dotenv
 
-# MongoDB Configuration
-DB_URL = 'mongodb://localhost:27017/'
+load_dotenv()
+
+MONGO_URL = os.getenv('MONGO_URL')
 DB_NAME = 'test'
 BUSINESSES_COLLECTION = 'businesses'
 REVIEWS_COLLECTION = 'reviews'
+
+if not MONGO_URL:
+    print('Error: MONGO_URL not set in .env file.')
+    sys.exit(1)
 
 # Review sorting options
 ind = {'most_relevant': 0, 'newest': 1, 'highest_rating': 2, 'lowest_rating': 3}
@@ -26,11 +32,11 @@ HEADER_W_SOURCE = ['id_review', 'caption', 'relative_date', 'retrieval_date', 'r
 
 class BusinessReviewScraper:
     
-    def __init__(self, debug=False, max_reviews_per_business=100, sort_by='newest'):
+    def __init__(self, debug=False, max_reviews_per_business=1000, sort_by='newest'):
         self.debug = debug
         self.max_reviews_per_business = max_reviews_per_business
         self.sort_by = sort_by
-        self.client = MongoClient(DB_URL)
+        self.client = MongoClient(MONGO_URL)
         self.db = self.client[DB_NAME]
         self.businesses_collection = self.db[BUSINESSES_COLLECTION]
         self.reviews_collection = self.db[REVIEWS_COLLECTION]
@@ -63,30 +69,50 @@ class BusinessReviewScraper:
     def scrape_all_businesses(self):
         """Main method to scrape reviews for all businesses"""
         self.logger.info("Starting review scraping for all businesses...")
-        
-        # Get all businesses from MongoDB
+
+        # Find new businesses (no 'last_scraped_at' field)
+        new_businesses = list(self.businesses_collection.find({'last_scraped_at': {'$exists': False}}))
+        if new_businesses:
+            self.logger.info(f"Found {len(new_businesses)} new businesses to scrape first")
+        else:
+            self.logger.info("No new businesses to prioritize")
+
+        # Scrape new businesses first
+        with GoogleMapsScraper(debug=self.debug) as scraper:
+            for business in new_businesses:
+                try:
+                    self.scrape_business_reviews(scraper, business)
+                    # Update last_scraped_at
+                    self.businesses_collection.update_one({'_id': business['_id']}, {'$set': {'last_scraped_at': datetime.utcnow()}})
+                except Exception as e:
+                    self.logger.error(f"Error scraping new business {business.get('business_name', 'Unknown')}: {str(e)}")
+                    continue
+
+        # Now scrape all businesses as usual (including new ones, so they get re-scraped in the future)
         businesses = list(self.businesses_collection.find({}))
-        self.logger.info(f"Found {len(businesses)} businesses to process")
-        
+        self.logger.info(f"Found {len(businesses)} businesses to process in regular schedule")
+
         if not businesses:
             self.logger.warning("No businesses found in the database")
             return
-        
+
         with GoogleMapsScraper(debug=self.debug) as scraper:
             for business in businesses:
                 try:
                     self.scrape_business_reviews(scraper, business)
+                    # Update last_scraped_at
+                    self.businesses_collection.update_one({'_id': business['_id']}, {'$set': {'last_scraped_at': datetime.utcnow()}})
                 except Exception as e:
                     self.logger.error(f"Error scraping business {business.get('business_name', 'Unknown')}: {str(e)}")
                     continue
-        
+
         self.logger.info("Completed review scraping for all businesses")
     
     def scrape_business_reviews(self, scraper, business):
         """Scrape reviews for a single business"""
         business_name = business.get('business_name', 'Unknown')
         business_id = business.get('_id')
-        google_url = business.get('google_business_url', '')
+        google_url = business.get('googleBusinessUrl', '')
         
         if not google_url:
             self.logger.warning(f"No Google business URL found for business: {business_name}")
@@ -124,6 +150,8 @@ class BusinessReviewScraper:
                 review['business_slug'] = business.get('slug', '')
                 review['google_business_url'] = google_url
                 review['scraped_at'] = datetime.utcnow()
+                # Add review URL
+                review['review_url'] = f"{google_url}/review/{review['id_review']}"
                 
                 # Check if review already exists
                 existing_review = self.reviews_collection.find_one({
@@ -202,7 +230,7 @@ def run_scraper():
 
 def main():
     parser = argparse.ArgumentParser(description='Google Maps Business Reviews Scraper with MongoDB')
-    parser.add_argument('--N', type=int, default=100, help='Number of reviews to scrape per business')
+    parser.add_argument('--N', type=int, default=1000, help='Number of reviews to scrape per business')
     parser.add_argument('--sort_by', type=str, default='newest', 
                        help='most_relevant, newest, highest_rating or lowest_rating')
     parser.add_argument('--debug', dest='debug', action='store_true', 
