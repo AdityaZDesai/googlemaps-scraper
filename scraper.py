@@ -11,6 +11,8 @@ from pymongo import MongoClient
 import sys
 import os
 from dotenv import load_dotenv
+import sched
+import threading
 
 load_dotenv()
 
@@ -40,239 +42,196 @@ class BusinessReviewScraper:
         self.db = self.client[DB_NAME]
         self.businesses_collection = self.db[BUSINESSES_COLLECTION]
         self.reviews_collection = self.db[REVIEWS_COLLECTION]
-        self.logger = self.__get_logger()
-        
-    def __get_logger(self):
-        """Create logger for the scraper"""
-        logger = logging.getLogger('business_review_scraper')
-        logger.setLevel(logging.DEBUG)
-        
-        # Create file handler
-        fh = logging.FileHandler('business_scraper.log')
-        fh.setLevel(logging.DEBUG)
-        
-        # Create console handler
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.INFO)
-        
-        # Create formatter
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        fh.setFormatter(formatter)
-        ch.setFormatter(formatter)
-        
-        # Add handlers to logger
-        logger.addHandler(fh)
-        logger.addHandler(ch)
-        
-        return logger
+        # Remove logger
+        # self.logger = self.__get_logger()
+    
+    # Remove __get_logger
+    # def __get_logger(self): ...
     
     def scrape_all_businesses(self):
-        """Main method to scrape reviews for all businesses"""
-        self.logger.info("Starting review scraping for all businesses...")
+        print("Starting review scraping for all businesses...")
 
-        # Find new businesses (no 'last_scraped_at' field)
         new_businesses = list(self.businesses_collection.find({'last_scraped_at': {'$exists': False}}))
         if new_businesses:
-            self.logger.info(f"Found {len(new_businesses)} new businesses to scrape first")
+            print(f"Found {len(new_businesses)} new businesses to scrape first")
         else:
-            self.logger.info("No new businesses to prioritize")
+            print("No new businesses to prioritize")
 
-        # Scrape new businesses first
         with GoogleMapsScraper(debug=self.debug) as scraper:
             for business in new_businesses:
                 try:
                     self.scrape_business_reviews(scraper, business)
-                    # Update last_scraped_at
                     self.businesses_collection.update_one({'_id': business['_id']}, {'$set': {'last_scraped_at': datetime.utcnow()}})
                 except Exception as e:
-                    self.logger.error(f"Error scraping new business {business.get('business_name', 'Unknown')}: {str(e)}")
+                    print(f"Error scraping new business {business.get('business_name', 'Unknown')}: {str(e)}")
                     continue
 
-        # Now scrape all businesses as usual (including new ones, so they get re-scraped in the future)
         businesses = list(self.businesses_collection.find({}))
-        self.logger.info(f"Found {len(businesses)} businesses to process in regular schedule")
+        print(f"Found {len(businesses)} businesses to process in regular schedule")
 
         if not businesses:
-            self.logger.warning("No businesses found in the database")
+            print("No businesses found in the database")
             return
 
         with GoogleMapsScraper(debug=self.debug) as scraper:
             for business in businesses:
                 try:
                     self.scrape_business_reviews(scraper, business)
-                    # Update last_scraped_at
                     self.businesses_collection.update_one({'_id': business['_id']}, {'$set': {'last_scraped_at': datetime.utcnow()}})
                 except Exception as e:
-                    self.logger.error(f"Error scraping business {business.get('business_name', 'Unknown')}: {str(e)}")
+                    print(f"Error scraping business {business.get('business_name', 'Unknown')}: {str(e)}")
                     continue
 
-        self.logger.info("Completed review scraping for all businesses")
+        print("Completed review scraping for all businesses")
     
     def scrape_business_reviews(self, scraper, business):
-        """Scrape reviews for a single business"""
-        business_name = business.get('business_name', 'Unknown')
+        business_name = business.get('business_name') or business.get('businessName', 'Unknown')
         business_id = business.get('_id')
+        # Try both possible locations for the Google URL
         google_url = business.get('googleBusinessUrl', '')
-        
         if not google_url:
-            self.logger.warning(f"No Google business URL found for business: {business_name}")
+            google_url = (
+                business.get('settings', {})
+                .get('reviewPlatforms', {})
+                .get('google', {})
+                .get('link', '')
+            )
+        if not google_url:
+            print(f"No Google business URL found for business: {business_name}")
             return
-        
-        self.logger.info(f"Scraping reviews for business: {business_name}")
-        self.logger.info(f"Google URL: {google_url}")
-        
-        # Sort reviews by specified criteria
+        print(f"Scraping reviews for business: {business_name}")
+        print(f"Google URL: {google_url}")
         error = scraper.sort_by(google_url, ind[self.sort_by])
-        
         if error != 0:
-            self.logger.error(f"Failed to sort reviews for {business_name}")
+            print(f"Failed to sort reviews for {business_name}")
             return
-        
         n_reviews = 0
         offset = 0
-        
         while n_reviews < self.max_reviews_per_business:
-            # Get reviews batch
             reviews = scraper.get_reviews(offset)
-            
             if len(reviews) == 0:
-                self.logger.info(f"No more reviews found for {business_name}")
+                print(f"No more reviews found for {business_name}")
                 break
-            
-            # Process each review
             for review in reviews:
                 if n_reviews >= self.max_reviews_per_business:
                     break
-                
-                # Add business metadata to review
-                review['business_id'] = business_id
-                review['business_name'] = business_name
-                review['business_slug'] = business.get('slug', '')
-                review['google_business_url'] = google_url
-                review['scraped_at'] = datetime.utcnow()
-                # Add review URL
-                review['review_url'] = f"{google_url}/review/{review['id_review']}"
-                
-                # Check if review already exists
+                review_dict = {
+                    'id_review': review.get('id_review', review.get('id', '')),
+                    'caption': review.get('caption', review.get('text', '')),
+                    'relative_date': review.get('relative_date', ''),
+                    'retrieval_date': datetime.utcnow(),
+                    'rating': review.get('rating', ''),
+                    'username': review.get('username', ''),
+                    'n_review_user': review.get('n_review_user', 0),
+                    'n_photo_user': review.get('n_photo_user', 0),
+                    'url_user': review.get('url_user', ''),
+                    'business_id': str(business_id) if business_id else '',
+                    'business_name': business_name if business_name else '',
+                    'business_slug': business.get('slug', ''),
+                    'business_url': google_url,  # Google business page
+                    'scraped_at': datetime.utcnow(),
+                    'review_url': f"{google_url}/review/{review.get('id_review', review.get('id', ''))}",
+                    'source': 'Google'
+                }
                 existing_review = self.reviews_collection.find_one({
-                    'id_review': review['id_review'],
-                    'business_id': business_id
+                    'id_review': review_dict['id_review'],
+                    'business_id': review_dict['business_id']
                 })
-                
                 if not existing_review:
-                    # Insert new review
-                    self.reviews_collection.insert_one(review)
+                    self.reviews_collection.insert_one(review_dict)
                     n_reviews += 1
-                    self.logger.info(f"Added review {n_reviews} for {business_name}")
+                    print(f"Added review {n_reviews} for {business_name}")
                 else:
-                    self.logger.debug(f"Review {review['id_review']} already exists for {business_name}")
-            
+                    print(f"Review {review_dict['id_review']} already exists for {business_name}")
             offset += len(reviews)
-            
-            # Small delay to be respectful to Google
             time.sleep(1)
-        
-        self.logger.info(f"Completed scraping {n_reviews} reviews for {business_name}")
-    
-    def export_to_csv(self, output_file='business_reviews.csv'):
-        """Export all reviews to CSV file"""
-        self.logger.info(f"Exporting reviews to {output_file}")
-        
-        # Get all reviews from database
-        reviews = list(self.reviews_collection.find({}))
-        
-        if not reviews:
-            self.logger.warning("No reviews found to export")
-            return
-        
-        # Prepare CSV data
-        csv_data = []
-        for review in reviews:
-            # Convert MongoDB ObjectId to string
-            review['business_id'] = str(review['business_id'])
-            review['scraped_at'] = review['scraped_at'].isoformat() if review.get('scraped_at') else ''
-            
-            # Create row with all fields
-            row = [
-                review.get('id_review', ''),
-                review.get('caption', ''),
-                review.get('relative_date', ''),
-                review.get('retrieval_date', ''),
-                review.get('rating', ''),
-                review.get('username', ''),
-                review.get('n_review_user', ''),
-                review.get('n_photo_user', ''),
-                review.get('url_user', ''),
-                review.get('google_business_url', ''),
-                review.get('business_name', ''),
-                review.get('business_slug', ''),
-                review.get('scraped_at', '')
-            ]
-            csv_data.append(row)
-        
-        # Write to CSV
-        with open(output_file, mode='w', encoding='utf-8', newline='\n') as file:
-            writer = csv.writer(file, quoting=csv.QUOTE_MINIMAL)
-            
-            # Write header
-            header = HEADER_W_SOURCE + ['business_name', 'business_slug', 'scraped_at']
-            writer.writerow(header)
-            
-            # Write data
-            writer.writerows(csv_data)
-        
-        self.logger.info(f"Exported {len(csv_data)} reviews to {output_file}")
+        print(f"Completed scraping {n_reviews} reviews for {business_name}")
 
-def run_scraper():
-    """Function to run the scraper (used by scheduler)"""
-    scraper = BusinessReviewScraper(debug=False, max_reviews_per_business=100, sort_by='newest')
-    scraper.scrape_all_businesses()
 
-def main():
-    parser = argparse.ArgumentParser(description='Google Maps Business Reviews Scraper with MongoDB')
-    parser.add_argument('--N', type=int, default=1000, help='Number of reviews to scrape per business')
-    parser.add_argument('--sort_by', type=str, default='newest', 
-                       help='most_relevant, newest, highest_rating or lowest_rating')
-    parser.add_argument('--debug', dest='debug', action='store_true', 
-                       help='Run scraper using browser graphical interface')
-    parser.add_argument('--export-csv', type=str, default=None, 
-                       help='Export reviews to CSV file')
-    parser.add_argument('--schedule', dest='schedule', action='store_true', 
-                       help='Run scraper every 3 hours')
-    parser.set_defaults(debug=False, schedule=False)
 
-    args = parser.parse_args()
+# Scheduler setup for Google reviews
+main_scheduler_google = sched.scheduler(time.time, time.sleep)
+hourly_scheduler_google = sched.scheduler(time.time, time.sleep)
+hourly_scrape_business_ids_google = set()
+last_enabled_status_google = {}
 
-    if args.schedule:
-        # Schedule the scraper to run every 3 hours
-        schedule.every(3).hours.do(run_scraper)
-        
-        print("Starting scheduled scraper (every 3 hours)...")
-        print("Press Ctrl+C to stop")
-        
-        # Run once immediately
-        run_scraper()
-        
-        # Keep running the scheduler
+def periodic_scrape_google():
+    client = MongoClient(MONGO_URL)
+    db = client[DB_NAME]
+    business_collection = db[BUSINESSES_COLLECTION]
+    all_businesses = list(business_collection.find({}))
+    for business in all_businesses:
+        try:
+            google_settings = business.get("settings", {}).get("reviewPlatforms", {}).get("google", {})
+            enabled = google_settings.get("enabled", False)
+            link = google_settings.get("link", None)
+            business_id = str(business.get('_id'))
+            was_enabled = last_enabled_status_google.get(business_id, False)
+            last_enabled_status_google[business_id] = enabled
+            if enabled and link:
+                if business_id not in hourly_scrape_business_ids_google:
+                    print(f"[IMMEDIATE] Scraping Google reviews for business: {business.get('business_name', business.get('_id'))} ({link})")
+                    scrape_google_reviews_for_business(business_id)
+                    hourly_scrape_business_ids_google.add(business_id)
+                    # Schedule hourly scraping for this business
+                    hourly_scheduler_google.enter(3600, 1, hourly_scrape_google, (business_id, link, business.get('business_name')))
+            else:
+                if business_id in hourly_scrape_business_ids_google:
+                    hourly_scrape_business_ids_google.remove(business_id)
+        except Exception as e:
+            print(f"Error processing business {business.get('business_name', business.get('_id'))}: {e}")
+    # Schedule next periodic scrape in 5 minutes
+    main_scheduler_google.enter(300, 1, periodic_scrape_google)
+
+def hourly_scrape_google(business_id, link, business_name):
+    try:
+        print(f"[HOURLY] Scraping Google reviews for business: {business_name} ({link})")
+        scrape_google_reviews_for_business(business_id)
+    except Exception as e:
+        print(f"Error in hourly scrape for business {business_name}: {e}")
+    # Reschedule next hourly scrape if still enabled
+    client = MongoClient(MONGO_URL)
+    db = client[DB_NAME]
+    business_collection = db[BUSINESSES_COLLECTION]
+    business = business_collection.find_one({'_id': business_id})
+    if business:
+        google_settings = business.get("settings", {}).get("reviewPlatforms", {}).get("google", {})
+        enabled = google_settings.get("enabled", False)
+        if enabled:
+            hourly_scheduler_google.enter(3600, 1, hourly_scrape_google, (business_id, link, business_name))
+        else:
+            if business_id in hourly_scrape_business_ids_google:
+                hourly_scrape_business_ids_google.remove(business_id)
+
+def scrape_google_reviews_for_business(business_id):
+    """Scrape Google reviews for a single business by business_id (string or ObjectId)."""
+    from bson import ObjectId
+    # Accept both string and ObjectId
+    try:
+        obj_id = ObjectId(business_id)
+    except Exception:
+        obj_id = business_id
+    client = MongoClient(MONGO_URL)
+    db = client[DB_NAME]
+    businesses_collection = db[BUSINESSES_COLLECTION]
+    business = businesses_collection.find_one({'_id': obj_id})
+    if not business:
+        print(f"Business with id {business_id} not found.")
+        return
+    scraper = BusinessReviewScraper(debug=False, max_reviews_per_business=1000, sort_by='newest')
+    with GoogleMapsScraper(debug=False) as gmaps_scraper:
+        scraper.scrape_business_reviews(gmaps_scraper, business)
+
+def start_google_schedulers():
+    main_scheduler_google.enter(0, 1, periodic_scrape_google)
+    threading.Thread(target=main_scheduler_google.run, daemon=True).start()
+    threading.Thread(target=hourly_scheduler_google.run, daemon=True).start()
+    # Keep the main thread alive
+    try:
         while True:
-            try:
-                schedule.run_pending()
-                time.sleep(60)  # Check every minute
-            except KeyboardInterrupt:
-                print("\nStopping scheduled scraper...")
-                break
-    else:
-        # Run once
-        scraper = BusinessReviewScraper(
-            debug=args.debug, 
-            max_reviews_per_business=args.N, 
-            sort_by=args.sort_by
-        )
-        
-        scraper.scrape_all_businesses()
-        
-        if args.export_csv:
-            scraper.export_to_csv(args.export_csv)
+            time.sleep(1)
+    except (KeyboardInterrupt, SystemExit):
+        print("Shutting down Google review schedulers.")
 
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    start_google_schedulers()
