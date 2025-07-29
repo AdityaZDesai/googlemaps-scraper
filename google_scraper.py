@@ -32,6 +32,93 @@ ind = {'most_relevant': 0, 'newest': 1, 'highest_rating': 2, 'lowest_rating': 3}
 HEADER = ['id_review', 'caption', 'relative_date', 'retrieval_date', 'rating', 'username', 'n_review_user', 'n_photo_user', 'url_user']
 HEADER_W_SOURCE = ['id_review', 'caption', 'relative_date', 'retrieval_date', 'rating', 'username', 'n_review_user', 'n_photo_user', 'url_user', 'url_source']
 
+def get_google_reviews(google_url, max_reviews=1000, sort_by='newest', debug=False):
+    """
+    Scrape Google reviews for a given business URL and return a list of reviews.
+    
+    Args:
+        google_url (str): The Google business URL to scrape reviews from
+        max_reviews (int): Maximum number of reviews to scrape (default: 1000)
+        sort_by (str): Sort order - 'most_relevant', 'newest', 'highest_rating', 'lowest_rating' (default: 'newest')
+        debug (bool): Enable debug mode (default: False)
+    
+    Returns:
+        list: List of review dictionaries with the following structure:
+        {
+            'id_review': str,
+            'caption': str,
+            'relative_date': str,
+            'retrieval_date': datetime,
+            'rating': str,
+            'username': str,
+            'n_review_user': int,
+            'n_photo_user': int,
+            'url_user': str,
+            'business_url': str,
+            'scraped_at': datetime,
+            'review_url': str,
+            'source': str
+        }
+    """
+    if not google_url:
+        print("No Google business URL provided")
+        return []
+    
+    print(f"Scraping reviews from: {google_url}")
+    
+    reviews_list = []
+    
+    try:
+        with GoogleMapsScraper(debug=debug) as scraper:
+            # Sort reviews by the specified criteria
+            error = scraper.sort_by(google_url, ind[sort_by])
+            if error != 0:
+                print(f"Failed to sort reviews for {google_url}")
+                return []
+            
+            n_reviews = 0
+            offset = 0
+            
+            while n_reviews < max_reviews:
+                reviews = scraper.get_reviews(offset)
+                if len(reviews) == 0:
+                    print(f"No more reviews found")
+                    break
+                
+                for review in reviews:
+                    if n_reviews >= max_reviews:
+                        break
+                    
+                    review_dict = {
+                        'id_review': review.get('id_review', review.get('id', '')),
+                        'caption': review.get('caption', review.get('text', '')),
+                        'relative_date': review.get('relative_date', ''),
+                        'retrieval_date': datetime.utcnow(),
+                        'rating': review.get('rating', ''),
+                        'username': review.get('username', ''),
+                        'n_review_user': review.get('n_review_user', 0),
+                        'n_photo_user': review.get('n_photo_user', 0),
+                        'url_user': review.get('url_user', ''),
+                        'business_url': google_url,
+                        'scraped_at': datetime.utcnow(),
+                        'review_url': f"{google_url}/review/{review.get('id_review', review.get('id', ''))}",
+                        'source': 'Google'
+                    }
+                    
+                    reviews_list.append(review_dict)
+                    n_reviews += 1
+                    print(f"Added review {n_reviews}")
+                
+                offset += len(reviews)
+                time.sleep(1)  # Rate limiting
+        
+        print(f"Completed scraping {len(reviews_list)} reviews")
+        return reviews_list
+        
+    except Exception as e:
+        print(f"Error scraping reviews from {google_url}: {str(e)}")
+        return []
+
 class BusinessReviewScraper:
     
     def __init__(self, debug=False, max_reviews_per_business=1000, sort_by='newest'):
@@ -234,4 +321,4 @@ def start_google_schedulers():
         print("Shutting down Google review schedulers.")
 
 if __name__ == "__main__":
-    start_google_schedulers()
+    print(get_google_reviews("https://www.google.com/maps/place/Lyndhurst+Bakehouse/@-38.0774459,145.2473688,17z/data=!3m1!5s0x6ad611df8b798d11:0xe97551daccb5a52!4m8!3m7!1s0x6ad61147c5474ba1:0xdcbc061f416965d2!8m2!3d-38.0774459!4d145.2499437!9m1!1b1!16s%2Fg%2F11h2j6pfqq?entry=ttu&g_ep=EgoyMDI1MDcyNy4wIKXMDSoASAFQAw%3D%3D"))
