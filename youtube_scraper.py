@@ -3,6 +3,9 @@ from dotenv import load_dotenv
 import json
 from datetime import datetime
 from search_terms import generate_search_term
+import uuid
+from dateutil import parser
+from dateutil.relativedelta import relativedelta
 
 # Load environment variables from .env file
 load_dotenv()
@@ -11,7 +14,7 @@ try:
     from apify_client import ApifyClient
     import google.generativeai as genai
 except ImportError as e:
-    print(f"Error: Missing required packages. Please install with: pip install apify-client google-generativeai")
+    print(f"Error: Missing required packages. Please install with: pip install apify-client google-generativeai python-dateutil")
     exit(1)
 
 # Configure Gemini API
@@ -38,13 +41,51 @@ def clean_youtube_url(url):
     
     return url
 
-def analyze_video(video_data, business_description):
+def calculate_relative_date(upload_date_str):
+    """
+    Calculate relative date from upload date string.
+    
+    Args:
+        upload_date_str (str): Upload date string from YouTube
+    
+    Returns:
+        str: Relative date string (e.g., "2 months ago")
+    """
+    try:
+        if not upload_date_str:
+            return "Unknown"
+        
+        # Parse the upload date
+        upload_date = parser.parse(upload_date_str)
+        now = datetime.now()
+        
+        # Calculate difference
+        diff = relativedelta(now, upload_date)
+        
+        if diff.years > 0:
+            return f"{diff.years} year{'s' if diff.years > 1 else ''} ago"
+        elif diff.months > 0:
+            return f"{diff.months} month{'s' if diff.months > 1 else ''} ago"
+        elif diff.days > 0:
+            return f"{diff.days} day{'s' if diff.days > 1 else ''} ago"
+        elif diff.hours > 0:
+            return f"{diff.hours} hour{'s' if diff.hours > 1 else ''} ago"
+        elif diff.minutes > 0:
+            return f"{diff.minutes} minute{'s' if diff.minutes > 1 else ''} ago"
+        else:
+            return "Just now"
+    except:
+        return "Unknown"
+
+def analyze_video(video_data, business_description, business_name, business_url):
     """
     Analyze a YouTube video and classify it according to the database structure using Gemini API.
     
     Args:
         video_data (dict): YouTube video data
         business_description (str): Description of the business to match relevance
+        business_name (str): Name of the business
+        business_url (str): URL of the business
     
     Returns:
         dict: Classified video data matching the database structure, or None if not relevant
@@ -90,7 +131,7 @@ def analyze_video(video_data, business_description):
     Respond ONLY in this exact JSON format:
     {{
         "relevant": true/false,
-        "sentiment": "positive"/"negative"/null,
+        "sentiment": "positive"/"negative"/"neutral",
         "rating": 1-5/null,
         "reasoning": "brief explanation"
     }}
@@ -133,29 +174,52 @@ def analyze_video(video_data, business_description):
         if not analysis.get('relevant', False):
             return None
         
-        # Return classified video data
+        # Generate unique IDs
+        review_id = str(uuid.uuid4())
+        business_id = str(uuid.uuid4())
+        
+        # Calculate relative date
+        relative_date = calculate_relative_date(upload_date)
+        
+        # Get current timestamp
+        current_time = datetime.now()
+        
+        # Create business slug from name
+        business_slug = business_name.lower().replace(' ', '-').replace('&', 'and').replace("'", '').replace('"', '')
+        
+        # Return classified video data in the required format
         return {
-            'platform': 'youtube',
-            'sentiment': analysis.get('sentiment'),
+            '_id': review_id,
+            'id_review': video_id,
+            'caption': title,
+            'relative_date': relative_date,
+            'retrieval_date': current_time.isoformat() + '+00:00',
             'rating': analysis.get('rating'),
             'username': channel_name,
-            'caption': title,
+            'n_review_user': 0,  # YouTube doesn't provide this info easily
+            'n_photo_user': 0,   # YouTube doesn't provide this info easily
             'url_user': url,
-            'url_post': url,
-            'engagement': {
-                'views': view_count,
-                'likes': like_count,
-                'comments': comment_count
-            },
+            'business_id': business_id,
+            'business_name': business_name,
+            'business_slug': business_slug,
+            'business_url': business_url,
+            'scraped_at': current_time.isoformat() + '+00:00',
+            'review_url': url,
+            'source': 'YouTube',
+            'sentiment': analysis.get('sentiment'),
+            'quotation_amount': 0,
+            'status': 'active',
             'metadata': {
                 'video_id': video_id,
                 'duration': duration,
                 'upload_date': upload_date,
                 'date': date,
                 'keywords': keywords,
-                'reasoning': analysis.get('reasoning', '')
-            },
-            'scraped_at': datetime.now().isoformat()
+                'reasoning': analysis.get('reasoning', ''),
+                'views': view_count,
+                'likes': like_count,
+                'comments': comment_count
+            }
         }
         
     except Exception as e:
@@ -172,7 +236,7 @@ def scrape_youtube(company_name, company_url, results_limit=50):
         results_limit (int): Number of results to return (default: 50)
     
     Returns:
-        list: List of relevant classified YouTube videos
+        list: List of relevant classified YouTube videos in the required format
     """
     try:
         print(f"DEBUG: Starting YouTube scraping for {company_name}")
@@ -228,7 +292,7 @@ def scrape_youtube(company_name, company_url, results_limit=50):
         print("DEBUG: Classifying videos for relevance...")
         relevant_videos = []
         for video in raw_videos:
-            classified = analyze_video(video, business_description)
+            classified = analyze_video(video, business_description, company_name, company_url)
             if classified:
                 relevant_videos.append(classified)
         
@@ -288,7 +352,7 @@ if __name__ == "__main__":
     print("=" * 80)
     
     # Get relevant YouTube videos
-    relevant_videos = scrape_youtube(company_name, company_url, results_limit=20)
+    relevant_videos = scrape_youtube(company_name, company_url, results_limit=50)
     
     print(f"\nFound {len(relevant_videos)} relevant videos:")
     print("=" * 80)
@@ -300,9 +364,9 @@ if __name__ == "__main__":
         print(f"Channel: {video['username']}")
         print(f"Title: {video['caption'][:200]}...")
         print(f"URL: {video['url_user']}")
-        print(f"Views: {video['engagement']['views']}")
-        print(f"Likes: {video['engagement']['likes']}")
-        print(f"Comments: {video['engagement']['comments']}")
+        print(f"Views: {video['metadata']['views']}")
+        print(f"Likes: {video['metadata']['likes']}")
+        print(f"Comments: {video['metadata']['comments']}")
         print("-" * 40)
     
 

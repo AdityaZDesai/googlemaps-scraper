@@ -18,3 +18,4 @@ google-generativeai
 flask
 flask-cors
 apify-client
+python-dateutil
