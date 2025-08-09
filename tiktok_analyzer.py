@@ -148,7 +148,7 @@ def generate_tiktok_keywords(company_name: str, business_description: str) -> Li
         top_snippets = results_fed_tiktok[:29]
         combined_text = "\n".join(f"- {result}" for result in top_snippets)
 
-        # Formulate Gemini prompt
+        # Formulate DeepSeek prompt
         prompt = (
             f"You are an expert in social media discovery.\n\n"
             f"Based on the following information about the company '{company_name}' "
@@ -161,7 +161,7 @@ def generate_tiktok_keywords(company_name: str, business_description: str) -> Li
             f"Ensure that all the phrases start with {company_name}"
         )
 
-        # Call Gemini
+        # Call DeepSeek (via call_gemini_api which now uses DeepSeek)
         response = call_gemini_api(prompt)
 
         # Parse and clean response
@@ -266,7 +266,7 @@ def extract_tiktok_transcripts(urls: List[str]) -> List[tuple]:
 def analyze_video_relevance(company_name: str, business_description: str, 
                           snippet: str, description: str, transcript: str) -> Dict[str, Any]:
     """
-    Analyze video relevance and rating using Gemini.
+    Analyze video relevance and rating using DeepSeek.
     """
     try:
         prompt = f"""

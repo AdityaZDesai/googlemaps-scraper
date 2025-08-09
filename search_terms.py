@@ -2,37 +2,34 @@ from dotenv import load_dotenv
 import os
 import sys
 import requests
-import google.generativeai as genai
 
 print("DEBUG: Loading environment variables...")
 load_dotenv() 
 print("DEBUG: Environment variables loaded")
 
-# Configure the API and create model instance
-print("DEBUG: Configuring Gemini API...")
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-model = genai.GenerativeModel('gemini-1.5-flash')
-print("DEBUG: Gemini API configured successfully")
+# Import DeepSeek API
+from deepseek_api import call_deepseek_api
+print("DEBUG: DeepSeek API imported successfully")
 
 def call_gemini_api(prompt: str) -> str:
     """
-    Sends `prompt` to Gemini Flash via the Gen AI SDK 
-    and returns the generated text.
+    Legacy function that now calls DeepSeek API instead of Gemini
+    Maintains backward compatibility for existing code
     """
     print(f"DEBUG: call_gemini_api called with prompt length: {len(prompt)}")
+    print("DEBUG: Redirecting to DeepSeek API...")
     
-    if not os.getenv("GOOGLE_API_KEY"):
-        print("DEBUG: ERROR - GOOGLE_API_KEY not found in environment")
-        raise RuntimeError("Please set GOOGLE_API_KEY in your environment")
+    if not os.getenv("DEEPSEEK_API_KEY"):
+        print("DEBUG: ERROR - DEEPSEEK_API_KEY not found in environment")
+        raise RuntimeError("Please set DEEPSEEK_API_KEY in your environment")
 
     try:
-        print("DEBUG: Sending request to Gemini API...")
-        # Generate a single best completion
-        response = model.generate_content(prompt)
-        print("DEBUG: Gemini API response received successfully")
-        return response.text
+        print("DEBUG: Sending request to DeepSeek API...")
+        response = call_deepseek_api(prompt)
+        print("DEBUG: DeepSeek API response received successfully")
+        return response
     except Exception as e:
-        print(f"DEBUG: Error calling Gemini API: {e}")
+        print(f"DEBUG: Error calling DeepSeek API: {e}")
         return "Error generating content"
 
 
@@ -135,12 +132,12 @@ def generate_search_term(company_name, url):
     """
     print(f"DEBUG: Prompt created, length: {len(prompt)}")
     
-    print("DEBUG: Calling Gemini API...")
-    response = call_gemini_api(prompt)
-    print(f"DEBUG: Gemini API response: {response}")
+    print("DEBUG: Calling DeepSeek API...")
+    response = call_gemini_api(prompt)  # This now calls DeepSeek internally
+    print(f"DEBUG: DeepSeek API response: {response}")
     
-    # Parse the Gemini response to extract the description
-    print("DEBUG: Parsing Gemini response...")
+    # Parse the DeepSeek response to extract the description
+    print("DEBUG: Parsing DeepSeek response...")
     print(f"DEBUG: Raw response: {repr(response)}")
     
     # Handle different response formats

@@ -9,14 +9,10 @@ load_dotenv()
 
 try:
     from apify_client import ApifyClient
-    import google.generativeai as genai
+    from deepseek_api import call_deepseek_api
 except ImportError as e:
-    print(f"Error: Missing required packages. Please install with: pip install apify-client google-generativeai")
+    print(f"Error: Missing required packages. Please install with: pip install apify-client")
     exit(1)
-
-# Configure Gemini API
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-model = genai.GenerativeModel('gemini-1.5-flash')
 
 def clean_reddit_url(url):
     """
@@ -39,7 +35,7 @@ def clean_reddit_url(url):
 
 def summarise(post, business_description):
     """
-    Analyze a Reddit post and classify it according to the database structure using Gemini API.
+    Analyze a Reddit post and classify it according to the database structure using DeepSeek API.
     
     Args:
         post (dict): Reddit post data containing title and content
@@ -61,7 +57,7 @@ def summarise(post, business_description):
     # Combine title and content for analysis
     full_text = f"{title} {content}".strip()
     
-    # Prompt for Gemini API
+    # Prompt for DeepSeek API
     prompt = f"""
     Analyze this Reddit post for business relevance and sentiment:
     
@@ -94,9 +90,8 @@ def summarise(post, business_description):
     """
     
     try:
-        # Get response from Gemini API
-        response = model.generate_content(prompt)
-        response_text = response.text.strip()
+        # Get response from DeepSeek API
+        response_text = call_deepseek_api(prompt).strip()
         
         # Parse JSON response
         if response_text.startswith('```json'):
@@ -154,7 +149,7 @@ def summarise(post, business_description):
         return classified_post
         
     except Exception as e:
-        print(f"Error analyzing post with Gemini API: {e}")
+        print(f"Error analyzing post with DeepSeek API: {e}")
         return None
 
 def scrape_reddit(company_name, company_url, results_limit=20):

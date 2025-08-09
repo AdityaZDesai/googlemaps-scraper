@@ -159,7 +159,6 @@ if __name__ == "__main__":
     # Example usage - modify these values for your business
     business_name = "Primal Queen"
     business_url = "https://primalqueen.com/"
-    google_maps_url = "https://www.google.com/maps/place/Primal+Queen/@40.7128,-74.0060,17z/"
     trustpilot_url = "https://www.trustpilot.com/review/primalqueen.com"
     
     # You can also test with minimal data:
@@ -168,6 +167,5 @@ if __name__ == "__main__":
     test_and_save_business(
         business_name=business_name,
         business_url=business_url,
-        google_maps_url=google_maps_url,
         trustpilot_url=trustpilot_url
     ) 

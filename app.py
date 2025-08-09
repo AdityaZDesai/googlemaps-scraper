@@ -390,9 +390,8 @@ def start_scraping():
             print(f"[INFO] Will skip platforms due to missing URLs: {', '.join(skipped_platforms)}")
         
         business_name = data['business_name']
-        business_url = data['business_url']
-        google_maps_url = data['google_maps_url']
-        trustpilot_url = data['trustpilot_url']
+        # Use the already extracted optional URLs with defaults
+        # business_url, google_maps_url, trustpilot_url are already defined above
         
         # Generate job ID first
         job_id = orchestrator.generate_unique_id()

@@ -14,7 +14,7 @@ selenium==4.17.2
 termcolor==2.4.0
 webdriver-manager==3.5.2
 python-dotenv
-google-generativeai
+# google-generativeai - replaced with DeepSeek API
 flask
 flask-cors
 apify-client

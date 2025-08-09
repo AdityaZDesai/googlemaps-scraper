@@ -4,16 +4,12 @@ import json
 from datetime import datetime
 import uuid
 from typing import List, Dict, Any
-import google.generativeai as genai
 from searchapi import search_search1api
 from tiktok_analyzer import get_business_description_from_url
+from deepseek_api import call_deepseek_api
 
 # Load environment variables from .env file
 load_dotenv()
-
-# Configure Gemini API
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-model = genai.GenerativeModel('gemini-1.5-flash')
 
 def generate_search_terms(business_name: str, business_description: str) -> List[str]:
     """
@@ -49,8 +45,7 @@ def generate_search_terms(business_name: str, business_description: str) -> List
     """
     
     try:
-        response = model.generate_content(prompt)
-        response_text = response.text.strip()
+        response_text = call_deepseek_api(prompt).strip()
         
         # Parse JSON response
         if response_text.startswith('```json'):
@@ -110,7 +105,7 @@ def filter_results(results: List[Dict], business_name: str) -> List[Dict]:
 
 def analyze_result_relevance(result: Dict, business_name: str, business_description: str) -> Dict[str, Any]:
     """
-    Analyze a search result for relevance and sentiment using Gemini API.
+    Analyze a search result for relevance and sentiment using DeepSeek API.
     
     Args:
         result (Dict): Search result data
@@ -159,8 +154,7 @@ def analyze_result_relevance(result: Dict, business_name: str, business_descript
     """
     
     try:
-        response = model.generate_content(prompt)
-        response_text = response.text.strip()
+        response_text = call_deepseek_api(prompt).strip()
         
         # Parse JSON response
         if response_text.startswith('```json'):

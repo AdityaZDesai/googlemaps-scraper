@@ -12,9 +12,9 @@ def check_environment():
     load_dotenv()
     
     required_vars = [
-        'GOOGLE_API_KEY',
-        'SEARCH1API_KEY',
-        'APIFY_API_KEY'
+        'DEEPSEEK_API',
+        'SEARCH1API_KEY', 
+        'APIFY_API'
     ]
     
     missing_vars = []
@@ -38,7 +38,7 @@ def check_dependencies():
         import flask
         import flask_cors
         import requests
-        import google.generativeai
+        # google.generativeai no longer needed - using DeepSeek API
         from apify_client import ApifyClient
         print("✅ All required packages are installed")
         return True

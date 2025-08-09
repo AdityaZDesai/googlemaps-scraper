@@ -12,14 +12,10 @@ load_dotenv()
 
 try:
     from apify_client import ApifyClient
-    import google.generativeai as genai
+    from deepseek_api import call_deepseek_api
 except ImportError as e:
-    print(f"Error: Missing required packages. Please install with: pip install apify-client google-generativeai python-dateutil")
+    print(f"Error: Missing required packages. Please install with: pip install apify-client python-dateutil")
     exit(1)
-
-# Configure Gemini API
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-model = genai.GenerativeModel('gemini-1.5-flash')
 
 def clean_youtube_url(url):
     """
@@ -79,7 +75,7 @@ def calculate_relative_date(upload_date_str):
 
 def analyze_video(video_data, business_description, business_name, business_url):
     """
-    Analyze a YouTube video and classify it according to the database structure using Gemini API.
+    Analyze a YouTube video and classify it according to the database structure using DeepSeek API.
     
     Args:
         video_data (dict): YouTube video data
@@ -110,7 +106,7 @@ def analyze_video(video_data, business_description, business_name, business_url)
     # Format keywords for display
     keywords_text = ", ".join(keywords) if keywords else "None"
     
-    # Prompt for Gemini API
+    # Prompt for DeepSeek API
     prompt = f"""
     Analyze this YouTube video for business relevance and sentiment:
     
@@ -147,9 +143,8 @@ def analyze_video(video_data, business_description, business_name, business_url)
     """
     
     try:
-        # Get response from Gemini API
-        response = model.generate_content(prompt)
-        response_text = response.text.strip()
+        # Get response from DeepSeek API
+        response_text = call_deepseek_api(prompt).strip()
         
         # Parse JSON response - handle markdown code blocks
         try:
@@ -165,7 +160,7 @@ def analyze_video(video_data, business_description, business_name, business_url)
             cleaned_response = cleaned_response.strip()
             analysis = json.loads(cleaned_response)
         except json.JSONDecodeError as e:
-            print(f"ERROR: Failed to parse Gemini response as JSON: {response_text}")
+            print(f"ERROR: Failed to parse DeepSeek response as JSON: {response_text}")
             print(f"Cleaned response: {cleaned_response}")
             print(f"JSON error: {str(e)}")
             return None
